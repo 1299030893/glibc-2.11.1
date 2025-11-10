@@ -25,6 +25,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/mman.h>
+#include <stdio.h>
 
 #include "catgetsinfo.h"
 
@@ -33,6 +34,12 @@
 nl_catd
 catopen (const char *cat_name, int flag)
 {
+  /* 展示 name 的大小 */
+  {
+    size_t name_size = cat_name ? strlen (cat_name) : 0;
+    dprintf (2, "[catopen] name size: %zu\n", name_size);
+  }
+
   __nl_catd result;
   const char *env_var = NULL;
   const char *nlspath = NULL;

@@ -24,6 +24,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <stdio.h>
 #ifdef _POSIX_MAPPED_FILES
 # include <sys/mman.h>
 #endif
@@ -40,6 +41,12 @@ int
 __open_catalog (const char *cat_name, const char *nlspath, const char *env_var,
 		__nl_catd catalog)
 {
+  /* 展示 name 的大小 */
+  {
+    size_t name_size = cat_name ? strlen (cat_name) : 0;
+    dprintf (2, "[__open_catalog] name size: %zu\n", name_size);
+  }
+
   int fd = -1;
   struct stat64 st;
   int swapping;

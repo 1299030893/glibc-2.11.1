@@ -1,4 +1,4 @@
-/* Copyright (C) 1996-2000, 2001, 2002, 2003 Free Software Foundation, Inc.
+/* Copyright (C) 1996-2016 Free Software Foundation, Inc.
    This file is part of the GNU C Library.
    Contributed by Ulrich Drepper, <drepper@gnu.org>.
 
@@ -13,9 +13,8 @@
    Lesser General Public License for more details.
 
    You should have received a copy of the GNU Lesser General Public
-   License along with the GNU C Library; if not, write to the Free
-   Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
-   02111-1307 USA.  */
+   License along with the GNU C Library; if not, see
+   <http://www.gnu.org/licenses/>.  */
 
 #include <byteswap.h>
 #include <endian.h>
@@ -56,12 +55,12 @@ __open_catalog (const char *cat_name, const char *nlspath, const char *env_var,
     {
       const char *run_nlspath = nlspath;
 #define ENOUGH(n)							      \
-  if (__builtin_expect (bufact + (n) >= bufmax, 0))			      \
+  if (__glibc_unlikely (bufact + (n) >= bufmax))			      \
     {									      \
       char *old_buf = buf;						      \
       bufmax += (bufmax < 256 + (n)) ? 256 + (n) : bufmax;		      \
-      buf = (char *) realloc (buf, bufmax);				      \
-      if (__builtin_expect (buf == NULL, 0))				      \
+      buf = realloc (buf, bufmax);					      \
+      if (__glibc_unlikely (buf == NULL))				      \
 	{								      \
 	  free (old_buf);						      \
 	  return -1;							      \
@@ -73,10 +72,8 @@ __open_catalog (const char *cat_name, const char *nlspath, const char *env_var,
 	 recognize certain % substitutions and stop when we found the
 	 first existing file.  */
       size_t bufact;
-      size_t bufmax;
+      size_t bufmax = 0;
       size_t len;
-
-      bufmax = 0;
 
       fd = -1;
       while (*run_nlspath != '\0')
@@ -260,7 +257,7 @@ __open_catalog (const char *cat_name, const char *nlspath, const char *env_var,
   /* Determine whether the file is a catalog file and if yes whether
      it is written using the correct byte order.  Else we have to swap
      the values.  */
-  if (__builtin_expect (catalog->file_ptr->magic == CATGETS_MAGIC, 1))
+  if (__glibc_likely (catalog->file_ptr->magic == CATGETS_MAGIC))
     swapping = 0;
   else if (catalog->file_ptr->magic == SWAPU32 (CATGETS_MAGIC))
     swapping = 1;

@@ -41,10 +41,10 @@ int
 __open_catalog (const char *cat_name, const char *nlspath, const char *env_var,
 		__nl_catd catalog)
 {
-  /* 展示 name 的大小 */
+  /* 展示 name 的大小（CVE-2015-8779 调查：分析可能的最大值） */
   {
     size_t name_size = cat_name ? strlen (cat_name) : 0;
-    dprintf (2, "[__open_catalog] name size: %zu\n", name_size);
+    dprintf (2, "[__open_catalog] cat_name size: %zu, nlspath: %s\n", name_size, nlspath ? "present" : "NULL");
   }
 
   int fd = -1;
@@ -65,7 +65,10 @@ __open_catalog (const char *cat_name, const char *nlspath, const char *env_var,
   if (__builtin_expect (bufact + (n) >= bufmax, 0))			      \
     {									      \
       char *old_buf = buf;						      \
+      size_t old_bufmax = bufmax;					      \
       bufmax += 256 + (n);						      \
+      /* 展示 alloca 分配的大小（CVE-2015-8779 关键点） */		      \
+      dprintf (2, "[__open_catalog] ENOUGH: allocating %zu bytes via alloca (old: %zu, need: %zu)\n", bufmax, old_bufmax, (n)); \
       buf = (char *) alloca (bufmax);					      \
       memcpy (buf, old_buf, bufact);					      \
     }
@@ -87,10 +90,12 @@ __open_catalog (const char *cat_name, const char *nlspath, const char *env_var,
 	{
 	  bufact = 0;
 
-	  if (*run_nlspath == ':')
+      if (*run_nlspath == ':')
 	    {
 	      /* Leading colon or adjacent colons - treat same as %N.  */
 	      len = strlen (cat_name);
+	      /* 展示 name 的大小（在 alloca 调用前） */
+	      dprintf (2, "[__open_catalog] : case: cat_name size: %zu, will allocate bufmax: %zu\n", len, bufmax);
 	      ENOUGH (len);
 	      memcpy (&buf[bufact], cat_name, len);
 	      bufact += len;
@@ -107,6 +112,8 @@ __open_catalog (const char *cat_name, const char *nlspath, const char *env_var,
 		    case 'N':
 		      /* Use the catalog name.  */
 		      len = strlen (cat_name);
+		      /* 展示 name 的大小（在 alloca 调用前） */
+		      dprintf (2, "[__open_catalog] %%N case: cat_name size: %zu, current bufmax: %zu\n", len, bufmax);
 		      ENOUGH (len);
 		      memcpy (&buf[bufact], cat_name, len);
 		      bufact += len;

@@ -34,10 +34,10 @@
 nl_catd
 catopen (const char *cat_name, int flag)
 {
-  /* 展示 name 的大小 */
+  /* 展示 name 的大小（CVE-2015-8779 调查：分析可能的最大值） */
   {
     size_t name_size = cat_name ? strlen (cat_name) : 0;
-    dprintf (2, "[catopen] name size: %zu\n", name_size);
+    dprintf (2, "[catopen] cat_name size: %zu, flag: %d\n", name_size, flag);
   }
 
   __nl_catd result;

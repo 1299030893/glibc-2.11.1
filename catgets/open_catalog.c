@@ -48,6 +48,7 @@ __open_catalog (const char *cat_name, const char *nlspath, const char *env_var,
   size_t tab_size;
   const char *lastp;
   int result = -1;
+  char *buf = NULL;
 
   if (strchr (cat_name, '/') != NULL || nlspath == NULL)
     fd = open_not_cancel_2 (cat_name, O_RDONLY);
@@ -55,24 +56,27 @@ __open_catalog (const char *cat_name, const char *nlspath, const char *env_var,
     {
       const char *run_nlspath = nlspath;
 #define ENOUGH(n)							      \
-  if (__builtin_expect (bufact + (n) >= bufmax, 0))			      \
-    {									      \
-      char *old_buf = buf;						      \
-      bufmax += 256 + (n);						      \
-      buf = (char *) alloca (bufmax);					      \
-      memcpy (buf, old_buf, bufact);					      \
-    }
+    if (__builtin_expect (bufact + (n) >= bufmax, 0))			      \
+      {									      \
+	char *old_buf = buf;						      \
+	size_t add = 256 + (n);						      \
+	bufmax += bufmax < add ? add : bufmax;				      \
+	buf = realloc (buf, bufmax);					      \
+	if (__builtin_expect (buf == NULL, 0))				      \
+	  {								      \
+	    free (old_buf);						      \
+	    return -1;							      \
+	  }								      \
+      }
 
       /* The RUN_NLSPATH variable contains a colon separated list of
 	 descriptions where we expect to find catalogs.  We have to
 	 recognize certain % substitutions and stop when we found the
 	 first existing file.  */
-      char *buf;
       size_t bufact;
       size_t bufmax;
       size_t len;
 
-      buf = NULL;
       bufmax = 0;
 
       fd = -1;
@@ -189,7 +193,10 @@ __open_catalog (const char *cat_name, const char *nlspath, const char *env_var,
 
   /* Avoid dealing with directories and block devices */
   if (__builtin_expect (fd, 0) < 0)
-    return -1;
+    {
+      free (buf);
+      return -1;
+    }
 
   if (__builtin_expect (__fxstat64 (_STAT_VER, fd, &st), 0) < 0)
     goto close_unlock_return;
@@ -326,6 +333,7 @@ __open_catalog (const char *cat_name, const char *nlspath, const char *env_var,
   /* Release the lock again.  */
  close_unlock_return:
   close_not_cancel_no_status (fd);
+  free (buf);
 
   return result;
 }

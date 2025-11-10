@@ -23,6 +23,7 @@
 #include <fcntl.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <unistd.h>
 #ifdef _POSIX_MAPPED_FILES
 # include <sys/mman.h>
@@ -46,7 +47,13 @@ __open_catalog (const char *cat_name, const char *nlspath, const char *env_var,
   size_t cnt;
   size_t max_offset;
   size_t tab_size;
+  size_t plane_prod;
+  size_t table_bytes;
+  size_t tables_bytes;
+  size_t header_bytes;
+  size_t strings_space;
   const char *lastp;
+  const char *strings_end;
   int result = -1;
 
   if (strchr (cat_name, '/') != NULL || nlspath == NULL)
@@ -278,14 +285,45 @@ __open_catalog (const char *cat_name, const char *nlspath, const char *env_var,
   catalog->plane_size = SWAP (catalog->file_ptr->plane_size);
   catalog->plane_depth = SWAP (catalog->file_ptr->plane_depth);
 
+  if (__builtin_expect (catalog->plane_size == 0
+			|| catalog->plane_depth == 0, 0))
+    goto invalid_file;
+
+  size_t plane_prod;
+  if (__builtin_expect (catalog->plane_size
+			> SIZE_MAX / catalog->plane_depth, 0))
+    goto invalid_file;
+  plane_prod = catalog->plane_size * catalog->plane_depth;
+
+  if (__builtin_expect (plane_prod > SIZE_MAX / 3, 0))
+    goto invalid_file;
+  tab_size = plane_prod * 3;
+
+  size_t table_bytes;
+  if (__builtin_expect (tab_size > SIZE_MAX / sizeof (u_int32_t), 0))
+    goto invalid_file;
+  table_bytes = tab_size * sizeof (u_int32_t);
+
+  size_t tables_bytes;
+  if (__builtin_expect (table_bytes > SIZE_MAX / 2, 0))
+    goto invalid_file;
+  tables_bytes = table_bytes * 2;
+
+  size_t header_bytes;
+  if (__builtin_expect (tables_bytes
+			> SIZE_MAX - sizeof (struct catalog_obj), 0))
+    goto invalid_file;
+  header_bytes = sizeof (struct catalog_obj) + tables_bytes;
+
+  if (__builtin_expect (header_bytes > catalog->file_size, 0))
+    goto invalid_file;
+
   /* The file contains two versions of the pointer tables.  Pick the
      right one for the local byte order.  */
 #if __BYTE_ORDER == __LITTLE_ENDIAN
   catalog->name_ptr = &catalog->file_ptr->name_ptr[0];
 #elif __BYTE_ORDER == __BIG_ENDIAN
-  catalog->name_ptr = &catalog->file_ptr->name_ptr[catalog->plane_size
-						  * catalog->plane_depth
-						  * 3];
+  catalog->name_ptr = &catalog->file_ptr->name_ptr[tab_size];
 #else
 # error Cannot handle __BYTE_ORDER byte order
 #endif
@@ -293,32 +331,30 @@ __open_catalog (const char *cat_name, const char *nlspath, const char *env_var,
   /* The rest of the file contains all the strings.  They are
      addressed relative to the position of the first string.  */
   catalog->strings =
-    (const char *) &catalog->file_ptr->name_ptr[catalog->plane_size
-					       * catalog->plane_depth * 3 * 2];
+    ((const char *) catalog->file_ptr) + header_bytes;
+
+  size_t strings_space = catalog->file_size - header_bytes;
+  if (__builtin_expect (strings_space == 0, 0))
+    goto invalid_file;
 
   /* Determine the largest string offset mentioned in the table.  */
   max_offset = 0;
-  tab_size = 3 * catalog->plane_size * catalog->plane_depth;
   for (cnt = 2; cnt < tab_size; cnt += 3)
     if (catalog->name_ptr[cnt] > max_offset)
       max_offset = catalog->name_ptr[cnt];
 
   /* Now we can check whether the file is large enough to contain the
      tables it says it contains.  */
-  if ((size_t) st.st_size
-      <= (sizeof (struct catalog_obj) + 2 * tab_size + max_offset))
+  if (__builtin_expect ((size_t) max_offset >= strings_space, 0))
     /* The last string is not contained in the file.  */
     goto invalid_file;
 
   lastp = catalog->strings + max_offset;
-  max_offset = (st.st_size
-		- sizeof (struct catalog_obj) + 2 * tab_size + max_offset);
-  while (*lastp != '\0')
-    {
-      if (--max_offset == 0)
-	goto invalid_file;
-      ++lastp;
-    }
+  strings_end = catalog->strings + strings_space;
+  while (lastp < strings_end && *lastp != '\0')
+    ++lastp;
+  if (__builtin_expect (lastp == strings_end, 0))
+    goto invalid_file;
 
   /* We succeeded.  */
   result = 0;

@@ -30,7 +30,20 @@
 #include "catgetsinfo.h"
 
 
-/* Open the catalog and return a descriptor for the catalog.  */
+/* Open the catalog and return a descriptor for the catalog.
+ *
+ * 调用链（CVE-2015-8779 调查）:
+ * isc_msgcat_open(name,...)【msgcat.c】
+ * ├─REQUIRE(name != NULL);
+ * └─msgcat->catalog = catopen(name, 0);
+ *   └─catopen(cat_name, flag)【catgets.c】
+ *     ├─/* 展示 name 的大小 */
+ *     │  {
+ *     │    size_t name_size = cat_name ? strlen (cat_name) : 0;
+ *     │    dprintf (2, "[catopen] cat_name size: %zu, flag: %d\n", name_size, flag);
+ *     │  }
+ *     └─__open_catalog(cat_name, nlspath, env_var, result)
+ */
 nl_catd
 catopen (const char *cat_name, int flag)
 {

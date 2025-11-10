@@ -37,6 +37,30 @@
 #define SWAPU32(w) bswap_32 (w)
 
 
+/* 调用链继续（CVE-2015-8779 调查）:
+ * └─__open_catalog(cat_name, nlspath, env_var, catalog)【open_catalog.c】
+ *   ├─/* 展示 name 的大小 */
+ *   │  {
+ *   │    size_t name_size = cat_name ? strlen (cat_name) : 0;
+ *   │    dprintf (2, "[__open_catalog] cat_name size: %zu, nlspath: %s\n", name_size, nlspath ? "present" : "NULL");
+ *   │  }
+ *   ├─if (strchr (cat_name, '/') != NULL || nlspath == NULL)
+ *   │  └─fd = open_not_cancel_2 (cat_name, O_RDONLY);
+ *   └─else
+ *     └─处理 NLSPATH 循环
+ *       ├─if (*run_nlspath == ':')
+ *       │  ├─len = strlen (cat_name);
+ *       │  ├─/* 展示 name 的大小（在 alloca 调用前） */
+ *       │  │  dprintf (2, "[__open_catalog] : case: cat_name size: %zu, will allocate bufmax: %zu\n", len, bufmax);
+ *       │  └─ENOUGH (len);
+ *       │     └─buf = (char *) alloca (bufmax);  // ⚠️ CVE-2015-8779 风险点
+ *       └─case 'N':
+ *         ├─len = strlen (cat_name);
+ *         ├─/* 展示 name 的大小（在 alloca 调用前） */
+ *         │  dprintf (2, "[__open_catalog] %%N case: cat_name size: %zu, current bufmax: %zu\n", len, bufmax);
+ *         └─ENOUGH (len);
+ *            └─buf = (char *) alloca (bufmax);  // ⚠️ CVE-2015-8779 风险点
+ */
 int
 __open_catalog (const char *cat_name, const char *nlspath, const char *env_var,
 		__nl_catd catalog)
@@ -61,6 +85,9 @@ __open_catalog (const char *cat_name, const char *nlspath, const char *env_var,
   else
     {
       const char *run_nlspath = nlspath;
+/* ENOUGH 宏：CVE-2015-8779 的关键风险点
+ * 当 cat_name 长度很大时，alloca() 可能导致栈溢出
+ */
 #define ENOUGH(n)							      \
   if (__builtin_expect (bufact + (n) >= bufmax, 0))			      \
     {									      \

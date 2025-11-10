@@ -23,6 +23,7 @@
 #include <fcntl.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <unistd.h>
 #ifdef _POSIX_MAPPED_FILES
 # include <sys/mman.h>
@@ -278,23 +279,36 @@ __open_catalog (const char *cat_name, const char *nlspath, const char *env_var,
   catalog->plane_size = SWAP (catalog->file_ptr->plane_size);
   catalog->plane_depth = SWAP (catalog->file_ptr->plane_depth);
 
+  /* Check for integer overflow in table size calculation (CVE-2015-8779).  */
+  if (catalog->plane_size == 0 || catalog->plane_depth == 0
+      || catalog->plane_size > ((size_t) -1) / 3 / catalog->plane_depth)
+    goto invalid_file;
+
   /* The file contains two versions of the pointer tables.  Pick the
      right one for the local byte order.  */
 #if __BYTE_ORDER == __LITTLE_ENDIAN
   catalog->name_ptr = &catalog->file_ptr->name_ptr[0];
 #elif __BYTE_ORDER == __BIG_ENDIAN
-  catalog->name_ptr = &catalog->file_ptr->name_ptr[catalog->plane_size
-						  * catalog->plane_depth
-						  * 3];
+  {
+    size_t offset = catalog->plane_size * catalog->plane_depth * 3;
+    /* Check for overflow: since we already checked 3*plane_size*plane_depth
+       doesn't overflow, this multiplication is safe.  */
+    catalog->name_ptr = &catalog->file_ptr->name_ptr[offset];
+  }
 #else
 # error Cannot handle __BYTE_ORDER byte order
 #endif
 
   /* The rest of the file contains all the strings.  They are
      addressed relative to the position of the first string.  */
-  catalog->strings =
-    (const char *) &catalog->file_ptr->name_ptr[catalog->plane_size
-					       * catalog->plane_depth * 3 * 2];
+  {
+    size_t offset = catalog->plane_size * catalog->plane_depth * 3 * 2;
+    /* Check for overflow in multiplication by 2.  */
+    if (offset / 2 != catalog->plane_size * catalog->plane_depth * 3)
+      goto invalid_file;
+    catalog->strings =
+      (const char *) &catalog->file_ptr->name_ptr[offset];
+  }
 
   /* Determine the largest string offset mentioned in the table.  */
   max_offset = 0;
@@ -305,18 +319,31 @@ __open_catalog (const char *cat_name, const char *nlspath, const char *env_var,
 
   /* Now we can check whether the file is large enough to contain the
      tables it says it contains.  */
-  if ((size_t) st.st_size
-      <= (sizeof (struct catalog_obj) + 2 * tab_size + max_offset))
-    /* The last string is not contained in the file.  */
-    goto invalid_file;
+  {
+    size_t required_size = sizeof (struct catalog_obj) + 2 * tab_size + max_offset;
+    if (required_size < sizeof (struct catalog_obj)
+	|| required_size < 2 * tab_size
+	|| required_size < max_offset
+	|| (size_t) st.st_size <= required_size)
+      /* The last string is not contained in the file.  */
+      goto invalid_file;
+  }
 
   lastp = catalog->strings + max_offset;
-  max_offset = (st.st_size
-		- sizeof (struct catalog_obj) + 2 * tab_size + max_offset);
+  {
+    size_t base_offset = sizeof (struct catalog_obj) + 2 * tab_size + max_offset;
+    if (base_offset < sizeof (struct catalog_obj)
+	|| base_offset < 2 * tab_size
+	|| base_offset < max_offset
+	|| (size_t) st.st_size < base_offset)
+      goto invalid_file;
+    max_offset = st.st_size - base_offset;
+  }
   while (*lastp != '\0')
     {
-      if (--max_offset == 0)
+      if (max_offset == 0)
 	goto invalid_file;
+      --max_offset;
       ++lastp;
     }
 
